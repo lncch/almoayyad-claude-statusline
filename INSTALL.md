@@ -9,19 +9,19 @@ This document is the authoritative install guide. It is written to be executed s
 
 ## 2. Clone the repo
 
-Clone to `~/.claude/statusline/` on Unix, or `%USERPROFILE%\.claude\statusline\` on Windows. If that directory already exists and is a git clone of this repo, run `git pull` in it instead of re-cloning.
+Clone to `~/.claude/statusline/` on Unix, or `%USERPROFILE%\.claude\statusline\` on Windows. If that directory already exists and is a git clone of this fork, run `git pull` in it instead of re-cloning.
 
 **macOS / Linux**
 
 ```bash
-git clone https://github.com/daniel3303/ClaudeCodeStatusLine ~/.claude/statusline
+git clone https://github.com/lncch/almoayyad-claude-statusline ~/.claude/statusline
 chmod +x ~/.claude/statusline/statusline.sh
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-git clone https://github.com/daniel3303/ClaudeCodeStatusLine "$env:USERPROFILE\.claude\statusline"
+git clone https://github.com/lncch/almoayyad-claude-statusline "$env:USERPROFILE\.claude\statusline"
 ```
 
 ## 3. Configure `settings.json`
