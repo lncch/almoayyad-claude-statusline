@@ -1,10 +1,17 @@
 # Claude Code Status Line
 
+> **This is a fork.** It adds a caveman-mode badge, an rtk token-savings segment, and
+> terminal-width line wrapping on top of the upstream status line.
+> See **[ADDITIONS.md](ADDITIONS.md)** for what changed and how to install it.
+
+
 A custom status line for [Claude Code](https://claude.com/claude-code) that displays model info, token usage, rate limits, and reset times in a single compact line. It runs as an external shell command, so it does not slow down Claude Code or consume any extra tokens.
 
 ## Screenshot
 
-![Status Line Screenshot](screenshot.png)
+![Status Line Screenshot](screenshot-fork.png)
+
+_Upstream screenshot: [screenshot.png](screenshot.png)_
 
 ## What it shows
 

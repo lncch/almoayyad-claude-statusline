@@ -24,6 +24,10 @@ white='\033[38;2;220;220;220m'
 dim='\033[2m'
 reset='\033[0m'
 
+# Internal marker for top-level "field | field" boundaries — replaced with either
+# the visual " | " separator or a newline at output time, depending on $COLUMNS.
+sep_marker=$'\x1e'
+
 # Format token counts (e.g., 50k / 200k)
 format_tokens() {
     local num=$1
@@ -132,16 +136,55 @@ if [ -z "$cli_version" ]; then
     fi
 fi
 
+# ===== Caveman mode badge =====
+# Mirrors the hardening in caveman-statusline.sh: reject symlinks, cap read at
+# 64 bytes, strip to a safe charset before ever printing flag-file contents.
+render_caveman_badge() {
+    local flag="${claude_config_dir}/.caveman-active"
+    [ -L "$flag" ] && return
+    [ ! -f "$flag" ] && return
+    local mode
+    mode=$(head -c 64 "$flag" 2>/dev/null | tr -d '\n\r' | tr '[:upper:]' '[:lower:]')
+    mode=$(printf '%s' "$mode" | tr -cd 'a-z0-9-')
+    case "$mode" in
+        off) return ;;
+        lite|full|ultra|wenyan-lite|wenyan|wenyan-full|wenyan-ultra|commit|review|compress) ;;
+        *) return ;;
+    esac
+    if [ -z "$mode" ] || [ "$mode" = "full" ]; then
+        printf 'CAVEMAN'
+    else
+        printf 'CAVEMAN:%s' "$(printf '%s' "$mode" | tr '[:lower:]' '[:upper:]')"
+    fi
+}
+
+# ===== RTK savings (rtk gain -f json) =====
+# Cheap (~10ms) — call inline rather than caching like the usage API fetch.
+render_rtk_savings() {
+    command -v rtk >/dev/null 2>&1 || return
+    local data
+    data=$(rtk gain -f json 2>/dev/null) || return
+    [ -z "$data" ] && return
+    local cmds saved pct
+    cmds=$(echo "$data" | jq -r '.summary.total_commands // 0' 2>/dev/null)
+    [ "$cmds" = "0" ] || [ -z "$cmds" ] && return
+    saved=$(echo "$data" | jq -r '.summary.total_saved // 0' 2>/dev/null)
+    pct=$(echo "$data" | jq -r '.summary.avg_savings_pct // 0' 2>/dev/null | awk '{printf "%.0f", $1}')
+    printf 'rtk %s%% (%s saved)' "$pct" "$(format_tokens "$saved")"
+}
+
 # ===== Build single-line output =====
 out=""
 out+="${blue}${model_name}${reset}"
+caveman_badge=$(render_caveman_badge)
+[ -n "$caveman_badge" ] && out+=" ${orange}[${caveman_badge}]${reset}"
 
 # Current working directory
 cwd=$(echo "$input" | jq -r '.cwd // empty')
 if [ -n "$cwd" ]; then
     display_dir="${cwd##*/}"
     git_branch=$(git -C "${cwd}" rev-parse --abbrev-ref HEAD 2>/dev/null)
-    out+=" ${dim}|${reset} "
+    out+="${sep_marker}"
     out+="${cyan}${display_dir}${reset}"
     if [ -n "$git_branch" ]; then
         out+="${dim}@${reset}${green}${git_branch}${reset}"
@@ -150,9 +193,9 @@ if [ -n "$cwd" ]; then
     fi
 fi
 
-out+=" ${dim}|${reset} "
+out+="${sep_marker}"
 out+="${orange}${used_tokens}/${total_tokens}${reset} ${dim}(${reset}${green}${pct_used}%${reset}${dim})${reset}"
-out+=" ${dim}|${reset} "
+out+="${sep_marker}"
 out+="effort: "
 case "$effort_level" in
     low)    out+="${dim}${effort_level}${reset}" ;;
@@ -369,7 +412,7 @@ format_reset_time() {
     [ -n "$formatted" ] && echo "$formatted"
 }
 
-sep=" ${dim}|${reset} "
+sep="${sep_marker}"
 
 # Render extra_usage segment from API usage data (not available via stdin rate_limits).
 # Appends to the global $out. No-op when data is missing or is_enabled is false.
@@ -509,12 +552,60 @@ if [ "${STATUSLINE_CHECK_UPDATES:-true}" != "false" ]; then
     fi
 fi
 
+rtk_savings=$(render_rtk_savings)
+[ -n "$rtk_savings" ] && out+="${sep}${cyan}${rtk_savings}${reset}"
+
 # Append CLI version as last segment
 if [ -n "$cli_version" ]; then
     out+=" ${dim}|${reset} ${orange}v${cli_version}${reset}"
 fi
 
+# ===== Wrap onto multiple lines when the terminal is too narrow =====
+# $out contains literal "\033[...m" escape text (not yet interpreted — that
+# happens at printf %b below), plus $sep_marker bytes at each top-level field
+# boundary. Strip the escape text to measure each field's true printed width.
+strip_ansi() {
+    printf '%s' "$1" | sed -E 's/\\033\[[0-9;]*m//g'
+}
+
+wrap_statusline() {
+    local text="$1"
+    local width="${COLUMNS:-0}"
+    local visual_sep=" ${dim}|${reset} "
+
+    if ! [ "$width" -gt 0 ] 2>/dev/null; then
+        printf '%b' "${text//$sep_marker/$visual_sep}"
+        return
+    fi
+
+    local IFS=$sep_marker
+    read -ra segs <<< "$text"
+
+    local line="" line_visible=0 first=1 result="" sep_width=3
+    for seg in "${segs[@]}"; do
+        local seg_visible seg_len
+        seg_visible=$(strip_ansi "$seg")
+        seg_len=${#seg_visible}
+
+        if [ "$first" -eq 1 ]; then
+            line="$seg"
+            line_visible=$seg_len
+            first=0
+        elif (( line_visible + sep_width + seg_len > width )); then
+            result+="${line}\n"
+            line="$seg"
+            line_visible=$seg_len
+        else
+            line+="${visual_sep}${seg}"
+            line_visible=$(( line_visible + sep_width + seg_len ))
+        fi
+    done
+    result+="$line"
+    printf '%b' "$result"
+}
+
 # Output
-printf "%b" "$out$update_line"
+wrap_statusline "$out"
+printf '%b' "$update_line"
 
 exit 0
